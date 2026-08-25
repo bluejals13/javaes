@@ -60,7 +60,7 @@ public class Student {
 	//입금
 	public void EditEl(int amount) 
 		throws InvalidGradeException{
-			if ( (amount > 4 )&&((amount < 1 ))) {
+			if ( (amount > 4 )||((amount < 1 ))) {
 				//Exception을 발생시킨다
 				throw new InvalidGradeException("학년은 1 ~ 4 사이 값으로 만 가능합니다", this.grade);
 			}
@@ -73,7 +73,7 @@ public class Student {
 		return "Student [학번=" + studentId + ", "
 				+ "이름=" + name + ", "
 				+ "학과=" + major + ", "
-				+ "잔액=" + grade + "]";
+				+ "학년=" + grade + "]";
 				
 	}
 	

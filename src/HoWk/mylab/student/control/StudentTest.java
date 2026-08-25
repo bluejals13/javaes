@@ -24,11 +24,16 @@ public class StudentTest {
 			System.out.println("학과 : " + account.getMajor() );
 			System.out.println("학년 : " + account.getMajor() );
 			
+			
+			
 			Student account2 = new Student("16172200", "홍길동", "정보보안", 1);
+			
+			System.out.println("학생 : " + account2.toString() );
 			// getClass().getName() + '@' + Integer.toHexStrig(hashCode());
 			// 출금
 			account2.EditEl(6);
-			System.out.println("잔액 : " + account2.toString() );
+			System.out.println("학생 : " + account2.toString() );
+			
 			
 		}catch(InvalidGradeException exp){
 			System.out.println("Error 메시지=" + exp.getMessage());
