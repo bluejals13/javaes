@@ -1,6 +1,6 @@
 package chapter5.oop.bad;
 /* 평사원 클래스 */
-public class MereClerk {
+public class MereClerk extends Employee {
     String name;
     double salary;
     
@@ -16,6 +16,7 @@ public class MereClerk {
         return this.salary;
     }
     
+    @Override
     public void manageSalary(double rate) {
         salary = salary+ salary*(rate/100);
     }
