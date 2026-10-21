@@ -1,35 +1,64 @@
-# This workflow will build a Java project with Maven, and cache/restore any dependencies to improve the workflow execution time
-# For more information see: https://docs.github.com/en/actions/automating-builds-and-tests/building-and-testing-java-with-maven
-
-# This workflow uses actions that are not certified by GitHub.
-# They are provided by a third-party and are governed by
-# separate terms of service, privacy policy, and support
-# documentation.
-
+# 워크플로 이름 (Actions 탭에 표시)
 name: Java CI with Maven
 
+# 실행 조건: main에 push 또는 main 대상 PR
 on:
   push:
     branches: [ "main" ]
   pull_request:
     branches: [ "main" ]
 
+# 워크플로 전체에서 쓰는 변수
+env:
+  DOCKER_IMAGE: boot-flyway-app   # Docker Hub 저장소 이름 (소문자)
+  DOCKER_TAG: v1                  # 이미지 태그
+
 jobs:
   build:
-
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest        # 매번 새 Ubuntu 가상 머신에서 실행
 
     steps:
-    - uses: actions/checkout@v4
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'temurin'
-        cache: maven
-    - name: Build with Maven
-      run: mvn -B package --file pom.xml
+      # 저장소 코드를 가상 머신으로 내려받기
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    # Optional: Uploads the full dependency graph to GitHub to improve the quality of Dependabot alerts this repository can receive
-    - name: Update dependency graph
-      uses: advanced-security/maven-dependency-submission-action@571e99aab1055c2e71a1e2309b9691de18d6b7d6
+      # JDK 17 설치 + Maven 의존성 캐시
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+          cache: maven
+
+      # 컴파일 확인 (테스트는 DB가 필요하므로 생략)
+      - name: Build with Maven
+        run: mvn -B clean package -Dmaven.test.skip=true
+
+      # ---- 아래는 main에 push될 때만 실행 (PR은 secrets 사용 불가) ----
+
+      # Docker 이미지 빌드 도구 준비
+      - name: Set up Docker Buildx
+        if: github.event_name == 'push'
+        uses: docker/setup-buildx-action@v3
+
+      # Docker Hub 로그인 (저장소 Settings > Secrets에 등록한 값)
+      - name: Login to Docker Hub
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}   # Access Token 권장
+
+      # Dockerfile로 이미지 빌드 후 Docker Hub에 push
+      - name: Build & push Docker image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .                 # 빌드 기준 폴더
+          file: ./Dockerfile
+          push: true
+          tags: |                    # 아이디/이미지:태그 (2개)
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
+            ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
+          cache-from: type=gha       # GitHub 캐시로 다음 빌드 속도 향상
+          cache-to: type=gha,mode=max
