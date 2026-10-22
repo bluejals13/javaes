@@ -1,37 +1,70 @@
-# 08-3-springboot-flyway-dockercompose
+# SpringBoot_Flyway_GitActions
 
-08-2의 Spring Boot + MariaDB 앱을 두 가지 방향으로 발전시킨 예제입니다.
+메모 API 백엔드입니다 (Spring Boot + Flyway + MariaDB + Docker Compose + GitHub Actions).
+
+08-2의 Spring Boot + MariaDB 앱을 세 가지 방향으로 발전시킨 예제입니다 (학습 단계 08-3).
 
 1. **Flyway**: 테이블을 JPA가 자동으로 만들지 않고, 버전이 붙은 SQL 파일로 관리
 2. **Docker Compose**: `docker network create`, `docker run` 두 번, 실행 순서 맞추기를 `compose.yaml` 하나로 정리
+3. **GitHub Actions**: main에 push하면 Docker Hub에 이미지를 자동으로 빌드, 업로드
+
+| 저장소 | 역할 |
+|---|---|
+| **SpringBoot_Flyway_GitActions** (이 저장소) | 메모 REST API (`/api/memos`) + MariaDB |
+| [React_Flyway_GitActions](https://github.com/vega2krookies5/React_Flyway_GitActions) | 메모 화면 (React + Vite), `/api` 요청을 이 백엔드로 전달 |
+
+## API
+
+| 메서드 | 경로 | 설명 | 응답 |
+|---|---|---|---|
+| GET | `/api/memos` | 메모 전체 조회 | 200 |
+| GET | `/api/memos/{id}` | 메모 1개 조회 | 200, 없으면 404 |
+| POST | `/api/memos` | 메모 저장 (본문: `{"content": "..."}`) | 201, 빈 내용이면 400 |
+| DELETE | `/api/memos/{id}` | 메모 삭제 | 204, 없으면 404 |
+| GET | `/actuator/health` | 앱 + DB 상태 | 200 (`UP`), DB 끊기면 503 |
+
+- 메모 API는 모두 `/api` 아래에 있습니다 (`MemoController`의 `@RequestMapping("/api/memos")`).
+- `/actuator/health`는 Spring Boot가 제공하는 운영용 경로라 `/api` 아래가 **아닙니다**. Docker HEALTHCHECK도 이 경로를 사용합니다.
+- 응답 예시:
+  ```json
+  { "id": 1, "content": "Flyway V2 마이그레이션으로 넣은 첫 메모입니다.",
+    "createdAt": "2026-10-22T12:00:00.123456", "updatedAt": "2026-10-22T12:00:00.123456" }
+  ```
 
 ## 이 예제의 목적
 
 | 주제 | 내용 |
 |---|---|
-| DB 마이그레이션 | 테이블 구조 변경을 `V1__...sql`, `V2__...sql` 파일로 기록하고 순서대로 적용 |
+| DB 마이그레이션 | 테이블 구조 변경을 `V1__...sql`, `V2__...sql`, `V3__...sql` 파일로 기록하고 순서대로 적용 |
 | `ddl-auto=validate` | JPA는 테이블을 만들지 않고 Entity와 테이블이 맞는지 **검사만** |
 | Docker Compose | 여러 컨테이너의 설정, 네트워크, 볼륨, 실행 순서를 파일 하나로 관리 |
 | 비밀 값 범위 줄이기 | 앱 컨테이너에는 root 비밀번호를 전달하지 않음 |
 
 ### 08-2와 달라진 점
 
-| 항목 | 08-2-springboot-mariadb | 08-3-springboot-flyway-dockercompose |
+| 항목 | 08-2-springboot-mariadb | 이 저장소 (08-3) |
 |---|---|---|
 | 실행 방법 | `docker network create` + `docker run` × 2 | `docker compose up -d --build` |
 | 실행 순서 | MariaDB가 healthy인지 **직접 확인** 후 앱 실행 | `depends_on: condition: service_healthy`로 **자동** |
 | 테이블 생성 | JPA `ddl-auto=update` | **Flyway** `V1__create_memo_table.sql` |
 | JPA 역할 | 테이블 생성 + 변경 | `ddl-auto=validate` (검사만) |
 | 초기 데이터 | 없음 | Flyway `V2__insert_welcome_memo.sql` |
+| 구조 변경 | Entity 수정 → JPA가 자동 반영 | Flyway `V3__add_updated_at.sql` (수정 시각 컬럼) |
+| API 경로 | `/memos` | `/api/memos` |
 | 추가 의존성 | - | `spring-boot-starter-flyway`, `flyway-mysql` |
 | init 폴더 마운트 | `${PWD}`, `$(pwd -W)`, `MSYS_NO_PATHCONV` 필요 | `./db/init` 상대 경로 그대로 (셸 차이 없음) |
 | 앱에 전달되는 값 | `.env` 전체 (root 비밀번호 포함) | 필요한 값만 (`environment:` + `${...}` 치환) |
-| 내 PC 포트 | 앱 8092, DB 3306 | 앱 **8093**, DB **3307** (08-2와 동시 실행 가능) |
+| 내 PC 포트 | 앱 8092, DB 3306 | 앱 **8080**, DB **3307** |
+| 이미지 배포 | 없음 | GitHub Actions → Docker Hub |
+
+> 08-2(앱 8092, DB 3306)와 포트가 겹치지 않으므로 동시에 실행할 수 있습니다. 8080을 다른 프로그램이 쓰고 있으면 `compose.yaml`의 app `ports:`를 `"8093:8080"`처럼 바꾸세요.
 
 ## 파일 구성
 
 ```
-08-3-springboot-flyway-dockercompose/
+SpringBoot_Flyway_GitActions/
+├── .github/workflows/
+│   └── maven.yml                         # [추가] GitHub Actions: Maven 빌드 + Docker Hub push
 ├── compose.yaml                          # [추가] MariaDB + 앱 실행 설정
 ├── Dockerfile                            # 08-2와 같은 구조
 ├── .dockerignore
@@ -41,16 +74,17 @@
 ├── db/init/
 │   └── 01-revoke-drop.sql                # MariaDB 최초 시작 시 실행 (08-2와 같음)
 ├── src/main/
-│   ├── java/com/example/demo/            # 08-2와 같음 (안내 문구만 변경)
+│   ├── java/com/example/demo/
 │   │   ├── DemoApplication.java
-│   │   ├── Memo.java
+│   │   ├── Memo.java                     # updatedAt 필드 추가 (V3와 짝)
 │   │   ├── MemoRepository.java
-│   │   └── MemoController.java
+│   │   └── MemoController.java           # 경로 /api/memos
 │   └── resources/
 │       ├── application.properties        # ddl-auto=validate, Flyway 설정
 │       └── db/migration/                 # [추가] Flyway 마이그레이션
 │           ├── V1__create_memo_table.sql
-│           └── V2__insert_welcome_memo.sql
+│           ├── V2__insert_welcome_memo.sql
+│           └── V3__add_updated_at.sql
 ├── 실행방법.txt
 └── README.md
 ```
@@ -118,6 +152,7 @@ docker compose exec mariadb mariadb -uboot -p boot_db -e "SELECT installed_rank,
 installed_rank  version  description          success
 1               1        create memo table    1
 2               2        insert welcome memo  1
+3               3        add updated at       1
 ```
 
 ### 지켜야 할 규칙
@@ -125,7 +160,7 @@ installed_rank  version  description          success
 | 규칙 | 어기면 |
 |---|---|
 | 적용된 파일은 **절대 수정하지 않음** | `Migration checksum mismatch`로 앱이 시작되지 않음 |
-| 변경은 항상 **새 버전 파일**로 추가 (V3, V4, ...) | - |
+| 변경은 항상 **새 버전 파일**로 추가 (V4, V5, ...) | - |
 | Entity를 바꾸면 같은 내용의 마이그레이션도 추가 | `ddl-auto=validate`가 `missing column` 오류로 시작 중단 |
 
 ### Flyway와 DROP 권한
@@ -269,7 +304,8 @@ docker compose logs -f app
 ```
 Migrating schema `boot_db` to version "1 - create memo table"
 Migrating schema `boot_db` to version "2 - insert welcome memo"
-Successfully applied 2 migrations to schema `boot_db`, now at version v2
+Migrating schema `boot_db` to version "3 - add updated at"
+Successfully applied 3 migrations to schema `boot_db`, now at version v3
 ```
 
 두 번째 실행부터는 `Schema `boot_db` is up to date. No migration necessary.`가 나옵니다.
@@ -278,45 +314,94 @@ Successfully applied 2 migrations to schema `boot_db`, now at version v2
 
 | 주소 | 기대 결과 |
 |---|---|
-| http://localhost:8093/ | 앱 안내 JSON |
-| http://localhost:8093/memos | V2가 넣은 첫 메모 1개 |
-| http://localhost:8093/actuator/health | `"status":"UP"`, `components.db.status`도 `UP` |
+| http://localhost:8080/api/memos | V2가 넣은 첫 메모 1개 (`updatedAt` 포함) |
+| http://localhost:8080/api/memos/1 | 첫 메모 1개 |
+| http://localhost:8080/actuator/health | `"status":"UP"`, `components.db.status`도 `UP` |
+
+> `http://localhost:8080/`에는 아무 API도 없으므로 404(Whitelabel Error Page)가 정상입니다. 화면은 프론트엔드 저장소가 담당합니다.
 
 ```bash
 # Git Bash
-curl -X POST http://localhost:8093/memos -H "Content-Type: application/json" -d '{"content":"compose memo"}'
-curl http://localhost:8093/memos
+curl -X POST http://localhost:8080/api/memos -H "Content-Type: application/json" -d '{"content":"compose memo"}'
+curl http://localhost:8080/api/memos
+curl -X DELETE http://localhost:8080/api/memos/2
 ```
 
 ```powershell
 # PowerShell
-Invoke-RestMethod -Method Post -Uri http://localhost:8093/memos -ContentType "application/json" -Body '{"content":"compose memo"}'
-Invoke-RestMethod http://localhost:8093/memos
+Invoke-RestMethod -Method Post -Uri http://localhost:8080/api/memos -ContentType "application/json" -Body '{"content":"compose memo"}'
+Invoke-RestMethod http://localhost:8080/api/memos
+Invoke-RestMethod -Method Delete -Uri http://localhost:8080/api/memos/2
 ```
 
-## 실습: V3 마이그레이션 추가
+### 프론트엔드와 함께 실행
 
-1. `src/main/resources/db/migration/V3__add_updated_at.sql` 생성
+[React_Flyway_GitActions](https://github.com/vega2krookies5/React_Flyway_GitActions) 저장소를 clone해서 `npm run dev`를 실행하면, `http://localhost:5173` 화면에서 이 백엔드의 메모를 보고 저장, 삭제할 수 있습니다.
+프론트엔드는 `/api`, `/actuator` 요청을 경로 그대로 이 백엔드(8080)로 전달하므로 백엔드에 CORS 설정은 필요 없습니다.
+
+## 마이그레이션 예시: V3 (수정 시각 컬럼)
+
+V3는 이미 이 저장소에 반영되어 있습니다. "구조를 바꿀 때 Entity와 마이그레이션을 함께 바꾼다"는 예시입니다.
+
+1. `src/main/resources/db/migration/V3__add_updated_at.sql`
    ```sql
    ALTER TABLE memo ADD COLUMN updated_at DATETIME(6) NULL;
+   UPDATE memo SET updated_at = created_at WHERE updated_at IS NULL;   -- 기존 데이터 채우기
    ```
-2. `Memo.java`에 필드 추가
+2. `Memo.java`
    ```java
    @Column(name = "updated_at")
    private LocalDateTime updatedAt;
    ```
-3. 앱만 다시 빌드
-   ```bash
-   docker compose up -d --build app
-   docker compose logs -f app     # version "3 - add updated at" 적용 확인
-   ```
+
+V1, V2만 적용된 기존 DB에서 앱을 다시 시작하면 V3만 새로 적용됩니다.
+```bash
+docker compose up -d --build app
+docker compose logs -f app     # version "3 - add updated at" 적용 확인
+```
+
+### 실습: V4를 직접 추가해 보기
+
+같은 방식으로 새 컬럼을 추가해 보세요. 예: 메모 고정 여부 `pinned`
+
+1. `V4__add_pinned.sql` 생성: `ALTER TABLE memo ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT FALSE;`
+2. `Memo.java`에 `private boolean pinned;` 필드와 getter 추가
+3. `docker compose up -d --build app` 후 로그에서 `version "4 - add pinned"` 확인
 
 일부러 실패도 해 보세요.
 
 | 해 볼 것 | 결과 |
 |---|---|
-| 2번만 하고 1번을 빼기 | `Schema-validation: missing column [updated_at] in table [memo]` |
+| 2번만 하고 1번을 빼기 | `Schema-validation: missing column [pinned] in table [memo]` |
 | 이미 적용된 V1 파일 내용을 수정 | `Validate failed: Migration checksum mismatch for migration version 1` |
+
+---
+
+## GitHub Actions (Docker Hub 자동 배포)
+
+`.github/workflows/maven.yml`이 다음을 수행합니다.
+
+| 이벤트 | 하는 일 |
+|---|---|
+| main 대상 Pull Request | Maven 빌드만 확인 (테스트는 DB가 필요해 생략) |
+| main에 push | Maven 빌드 → Docker 이미지 빌드 → Docker Hub push |
+
+올라가는 이미지:
+```
+아이디/boot-flyway-app:v1
+아이디/boot-flyway-app:latest
+```
+
+처음 한 번 저장소 **Settings > Secrets and variables > Actions**에 등록합니다.
+
+| 이름 | 값 |
+|---|---|
+| `DOCKER_USERNAME` | Docker Hub 아이디 |
+| `DOCKER_PASSWORD` | Docker Hub **Access Token** (Account settings > Personal access tokens, Read & Write) |
+
+> 프론트엔드 저장소는 `아이디/boot-flyway-web`으로 올라갑니다. 백엔드 API 경로를 바꾸면 프론트엔드 프록시 설정도 함께 바꾸고, **두 이미지를 같이 배포**해야 합니다.
+
+> Git Bash에서 커밋 메시지를 `/`로 시작하면(`git commit -m "/api/memos ..."`) Windows 경로(`C:/Program Files/Git/api/...`)로 바뀌어 저장됩니다. 메시지는 `/`로 시작하지 않게 쓰세요.
 
 ## 문제 해결
 
@@ -327,12 +412,16 @@ Invoke-RestMethod http://localhost:8093/memos
 | `Unsupported Database: MariaDB` | `flyway-mysql` 의존성 누락 | `pom.xml` 확인 후 `docker compose up -d --build app` |
 | 마이그레이션이 실행되지 않음 (로그에 Flyway가 없음) | `spring-boot-starter-flyway` 누락 (Spring Boot 4는 `flyway-core`만으로는 자동 실행 안 됨) | `pom.xml` 확인 |
 | `Schema-validation: missing table [memo]` | 마이그레이션 파일 위치나 이름 오류 | `src/main/resources/db/migration/`, 밑줄 2개(`V1__`) 확인 |
-| `Schema-validation: missing column` | Entity에 필드를 추가했지만 마이그레이션 없음 | 새 버전 파일(V3...)로 컬럼 추가 |
+| `Schema-validation: missing column` | Entity에 필드를 추가했지만 마이그레이션 없음 | 새 버전 파일(V4...)로 컬럼 추가 |
+| `/memos` 호출 시 404 | API 경로가 `/api/memos`로 바뀜 | `/api/memos`로 호출 |
+| `http://localhost:8080/` 이 404 | 루트 경로에는 API가 없음 | 정상, `/api/memos` 또는 `/actuator/health` 확인 |
+| GitHub Actions의 Docker 로그인 실패 | Secrets 미등록, 또는 비밀번호 대신 만료된 토큰 | `DOCKER_USERNAME`, `DOCKER_PASSWORD` 다시 등록 |
 | `Migration checksum mismatch` | 이미 적용된 파일을 수정함 | 파일을 원래대로 되돌리고 변경은 새 버전으로 (연습 중이라면 `docker compose down -v` 후 다시 시작) |
 | `Found non-empty schema(s) ... but no schema history table` | 08-2처럼 JPA가 만든 테이블이 있는 DB에 Flyway를 처음 적용 | 이 예제는 새 볼륨을 쓰므로 정상적으로는 발생하지 않음, 기존 DB라면 `spring.flyway.baseline-on-migrate=true` 검토 |
 | `.env`를 바꿨는데 계정, 비밀번호가 그대로 | 기존 볼륨으로 시작해 자동 초기화가 건너뛰어짐 | `docker compose down -v` 후 다시 `up` (데이터 삭제됨) |
 | 비밀번호에 `$`가 있으면 값이 잘림 | Compose가 `$`를 변수로 해석 | `$` 대신 다른 문자를 쓰거나 `$$`로 입력 |
-| 포트 사용 중 오류 | 8093이나 3307을 다른 프로그램이 사용 | `compose.yaml`의 `ports:` 앞 번호 변경 |
+| 포트 사용 중 오류 | 8080이나 3307을 다른 프로그램이 사용 | `compose.yaml`의 `ports:` 앞 번호 변경 (예: `"8093:8080"`) |
+| `application.properties` 한글 주석이 `앱...`로 보임 | IntelliJ의 *Transparent native-to-ASCII conversion* | Settings > Editor > File Encodings에서 해제 후 한글로 되돌리기 (동작에는 영향 없음) |
 
 ## 정리
 
