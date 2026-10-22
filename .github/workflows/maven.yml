@@ -1,28 +1,75 @@
-# 워크플로 이름 (Actions 탭에 표시)
+# ==========================================================
+# GitHub Actions: Spring Boot 백엔드 빌드 + Docker Hub push
+#
+# 위치: 08-3-springboot-flyway-dockercompose/.github/workflows/maven.yml
+#       (GitHub 저장소: SpringBoot_Flyway_GitActions)
+#
+# 흐름
+#   Pull Request → Checkout → JDK 17 → Maven 빌드 (컴파일 확인만)
+#   main 에 push → 위 과정 + Docker 이미지 빌드 → Docker Hub push
+#
+# 결과 이미지
+#   <Docker Hub 아이디>/boot-flyway-app:v1
+#   <Docker Hub 아이디>/boot-flyway-app:latest   ← EC2 compose 가 받는 태그
+#
+# 처음 한 번 필요한 설정 (GitHub 저장소 Settings > Secrets and variables > Actions)
+#   DOCKER_USERNAME : Docker Hub 아이디
+#   DOCKER_PASSWORD : Docker Hub Access Token (Read & Write 권한)
+#
+# 실행 결과 확인: GitHub 저장소의 Actions 탭
+# ==========================================================
+
+# 워크플로 이름 (Actions 탭 목록에 표시)
 name: Java CI with Maven
 
-# 실행 조건: main에 push 또는 main 대상 PR
+# ----------------------------------------------------------
+# 실행 조건 (트리거)
+# ----------------------------------------------------------
 on:
+  # main 브랜치에 커밋이 push 될 때 (PR 이 병합될 때도 main 에 push 가 일어나므로 실행됨)
   push:
     branches: [ "main" ]
+  # main 으로 병합하려는 Pull Request 를 만들거나 수정할 때
+  # → 병합 전에 빌드가 깨지지 않는지 미리 확인하는 용도
   pull_request:
     branches: [ "main" ]
 
+# ----------------------------------------------------------
 # 워크플로 전체에서 쓰는 변수
+# - 아래 단계에서 ${{ env.이름 }} 으로 사용
+# - 이미지 이름이나 버전을 바꿀 때 여기만 수정하면 됨
+# ----------------------------------------------------------
 env:
-  DOCKER_IMAGE: boot-flyway-app   # Docker Hub 저장소 이름 (소문자)
-  DOCKER_TAG: v1                  # 이미지 태그
+  DOCKER_IMAGE: boot-flyway-app   # Docker Hub 저장소 이름 (소문자만 가능, 프론트엔드는 boot-flyway-web)
+  DOCKER_TAG: v1                  # 버전 태그 (새 버전을 구분해 남기고 싶으면 v2, v3 ... 로 변경)
 
+# ----------------------------------------------------------
+# 실제로 할 일 (job)
+# - job 이 여러 개면 기본적으로 동시에 실행됨, 여기서는 build 하나
+# ----------------------------------------------------------
 jobs:
   build:
-    runs-on: ubuntu-latest        # 매번 새 Ubuntu 가상 머신에서 실행
+    # 실행 환경: GitHub 이 제공하는 Ubuntu 가상 머신 (runner)
+    # - 실행할 때마다 깨끗한 새 머신에서 시작하고, 끝나면 사라짐
+    # - x86(amd64) 머신이므로 만들어지는 Docker 이미지도 x86 용 → EC2 도 x86 인스턴스 사용
+    runs-on: ubuntu-latest
 
+    # 순서대로 실행할 단계들
+    # - uses: 다른 사람이 만들어 둔 액션(재사용 모듈) 사용, @v4 는 액션의 메이저 버전
+    # - run : 셸 명령 직접 실행
+    # - 한 단계라도 실패하면 뒤 단계는 실행되지 않고 워크플로 전체가 실패(빨간색)
     steps:
-      # 저장소 코드를 가상 머신으로 내려받기
+
+      # 1. 저장소 코드를 가상 머신으로 내려받기 (git clone 과 같은 역할)
+      #    - 이 단계가 없으면 pom.xml, Dockerfile, src 가 없어서 뒤 단계가 모두 실패
+      #    - 이 워크플로를 실행시킨 커밋(push 또는 PR)을 받음
       - name: Checkout
         uses: actions/checkout@v4
 
-      # JDK 17 설치 + Maven 의존성 캐시
+      # 2. JDK 17 설치 + Maven 의존성 캐시
+      #    - distribution: temurin = Eclipse Temurin (OpenJDK 배포판, Dockerfile 의 이미지와 같은 계열)
+      #    - cache: maven = ~/.m2 저장소를 GitHub 캐시에 저장
+      #      → 다음 실행부터 의존성을 다시 내려받지 않아 빌드가 빨라짐 (pom.xml 이 바뀌면 새로 받음)
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -30,18 +77,31 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # 컴파일 확인 (테스트는 DB가 필요하므로 생략)
+      # 3. Maven 빌드 (컴파일 오류 확인)
+      #    - -B : batch 모드 (진행 표시 없이 로그를 깔끔하게 출력, CI 용)
+      #    - clean package : target 폴더를 지우고 다시 빌드해 JAR 생성
+      #    - -Dmaven.test.skip=true : 테스트 컴파일과 실행 모두 생략
+      #      → DemoApplicationTests(contextLoads)는 MariaDB 가 있어야 통과하는데 runner 에는 DB 가 없음
+      #    - 참고: 실제 이미지의 JAR 는 Dockerfile 안에서 다시 빌드되므로, 이 단계는 "빠른 오류 확인" 용도
       - name: Build with Maven
         run: mvn -B clean package -Dmaven.test.skip=true
 
-      # ---- 아래는 main에 push될 때만 실행 (PR은 secrets 사용 불가) ----
+      # ---- 아래 3단계는 main 에 push 될 때만 실행 ----
+      # if: github.event_name == 'push'
+      #   - Pull Request 에서는 실행하지 않음
+      #   - 이유 1: PR 은 아직 검토 전 코드이므로 이미지를 배포하면 안 됨
+      #   - 이유 2: fork 저장소에서 온 PR 은 보안상 secrets 를 읽을 수 없어 로그인 단계가 실패함
 
-      # Docker 이미지 빌드 도구 준비
+      # 4. Docker 이미지 빌드 도구(Buildx) 준비
+      #    - 아래 build-push-action 이 사용하는 빌더
+      #    - GitHub 캐시(type=gha)에 빌드 레이어를 저장하려면 Buildx 가 필요
       - name: Set up Docker Buildx
         if: github.event_name == 'push'
         uses: docker/setup-buildx-action@v3
 
-      # Docker Hub 로그인 (저장소 Settings > Secrets에 등록한 값)
+      # 5. Docker Hub 로그인
+      #    - secrets.XXX : 저장소 Settings > Secrets 에 등록한 값 (로그에는 *** 로 가려져 표시됨)
+      #    - 비밀번호 대신 Access Token 을 권장: 유출되면 토큰만 삭제하면 되고 권한도 제한 가능
       - name: Login to Docker Hub
         if: github.event_name == 'push'
         uses: docker/login-action@v3
@@ -49,16 +109,26 @@ jobs:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}   # Access Token 권장
 
-      # Dockerfile로 이미지 빌드 후 Docker Hub에 push
+      # 6. Dockerfile 로 이미지를 빌드하고 Docker Hub 에 push
       - name: Build & push Docker image
         if: github.event_name == 'push'
         uses: docker/build-push-action@v6
         with:
-          context: .                 # 빌드 기준 폴더
+          # 빌드 기준 폴더 (docker build . 의 . 과 같음)
+          # - Dockerfile 의 COPY 는 이 폴더 기준, .dockerignore 도 이 폴더의 것을 사용
+          context: .
+          # 사용할 Dockerfile (멀티 스테이지: Maven 으로 JAR 빌드 → JRE 이미지로 실행)
           file: ./Dockerfile
+          # true: 빌드 후 Docker Hub 에 업로드 (false 면 빌드만)
           push: true
-          tags: |                    # 아이디/이미지:태그 (2개)
+          # 이미지 이름:태그 (같은 이미지에 태그 2개를 붙임)
+          # - :v1     → 버전 기록용, 나중에 이 버전으로 되돌릴 때 사용
+          # - :latest → 항상 마지막 빌드를 가리킴, EC2 의 compose.yaml 이 기본으로 받는 태그
+          tags: |
             ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:${{ env.DOCKER_TAG }}
             ${{ secrets.DOCKER_USERNAME }}/${{ env.DOCKER_IMAGE }}:latest
-          cache-from: type=gha       # GitHub 캐시로 다음 빌드 속도 향상
+          # 빌드 캐시 (GitHub Actions 캐시 저장소 사용)
+          # - cache-from: 이전 빌드에서 저장한 레이어를 가져와 재사용 → pom.xml 이 그대로면 의존성 다운로드 생략
+          # - cache-to  : 이번 빌드의 레이어를 저장, mode=max 는 중간 단계(빌드 스테이지)까지 모두 저장
+          cache-from: type=gha
           cache-to: type=gha,mode=max
