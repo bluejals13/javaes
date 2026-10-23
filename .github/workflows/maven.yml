@@ -28,11 +28,11 @@ name: Java CI with Maven
 on:
   # main 브랜치에 커밋이 push 될 때 (PR 이 병합될 때도 main 에 push 가 일어나므로 실행됨)
   push:
-    branches: [ "main" ]
+    branches: [ "깃액션-실습" ]
   # main 으로 병합하려는 Pull Request 를 만들거나 수정할 때
   # → 병합 전에 빌드가 깨지지 않는지 미리 확인하는 용도
   pull_request:
-    branches: [ "main" ]
+    branches: [ "깃액션-실습" ]
 
 # ----------------------------------------------------------
 # 워크플로 전체에서 쓰는 변수
